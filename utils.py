@@ -8,7 +8,9 @@ from networks import Vgg16
 from torch.autograd import Variable
 from torch.optim import lr_scheduler
 from torchvision import transforms
+import torchvision
 from data import ImageFilelist, ImageFolder
+import custom_datasets
 import torch
 import torch.nn as nn
 import os
@@ -58,6 +60,11 @@ def get_all_data_loaders(conf):
                                               new_size_b, height, width, num_workers, True)
         test_loader_b = get_data_loader_folder(os.path.join(conf['data_root'], 'testB'), batch_size, False,
                                              new_size_b, new_size_b, new_size_b, num_workers, True)
+    elif ('data_folder_a' in conf) and ('data_folder_b' in conf):
+        train_loader_a = get_custom_data_loader(conf['data_folder_a'], batch_size, True, size=new_size_a, num_workers=num_workers)
+        test_loader_a = get_custom_data_loader(conf['data_folder_a'], batch_size, False, size=new_size_a, num_workers=num_workers)
+        train_loader_b = get_custom_data_loader(conf['data_folder_b'], batch_size, True, size=new_size_b, num_workers=num_workers)
+        test_loader_b = get_custom_data_loader(conf['data_folder_b'], batch_size, False, size=new_size_b, num_workers=num_workers)
     else:
         train_loader_a = get_data_loader_list(conf['data_folder_train_a'], conf['data_list_train_a'], batch_size, True,
                                                 new_size_a, height, width, num_workers, True)
@@ -88,8 +95,8 @@ def get_data_loader_folder(input_folder, batch_size, train, new_size=None,
     transform_list = [transforms.ToTensor(),
                       transforms.Normalize((0.5, 0.5, 0.5),
                                            (0.5, 0.5, 0.5))]
-    transform_list = [transforms.RandomCrop((height, width))] + transform_list if crop else transform_list
     transform_list = [transforms.Resize(new_size)] + transform_list if new_size is not None else transform_list
+    transform_list = [transforms.RandomCrop((height, width))] + transform_list if crop else transform_list
     transform_list = [transforms.RandomHorizontalFlip()] + transform_list if train else transform_list
     transform = transforms.Compose(transform_list)
     dataset = ImageFolder(input_folder, transform=transform)
@@ -97,9 +104,24 @@ def get_data_loader_folder(input_folder, batch_size, train, new_size=None,
     return loader
 
 
+def get_custom_data_loader(input_folder, batch_size, train=True, size=256, num_workers=4, crop=True):
+    # Find the loader by data root name
+    for ds_name in custom_datasets.AVAILABLE:
+        if ds_name in input_folder.upper():
+            print('Root path indicates %s dataset' % ds_name)
+            ds_class = getattr(custom_datasets, ds_name)
+            transform = custom_datasets.get_default_transform(size)
+            dataset = ds_class(root=input_folder, download=True, transform=transform, train=train)
+            return DataLoader(dataset=dataset, batch_size=batch_size, shuffle=train, drop_last=True, num_workers=num_workers)
+
+    raise Exception('No custom dataset recognized from directory %s' % input_folder)
+
+
 def get_config(config):
     with open(config, 'r') as stream:
-        return yaml.load(stream)
+        c = yaml.load(stream)
+        print(c)
+        return c
 
 
 def eformat(f, prec):
@@ -211,9 +233,11 @@ def get_model_list(dirname, key):
         return None
     gen_models = [os.path.join(dirname, f) for f in os.listdir(dirname) if
                   os.path.isfile(os.path.join(dirname, f)) and key in f and ".pt" in f]
+    print(key, gen_models)
     if gen_models is None:
         return None
     gen_models.sort()
+    print(key, gen_models)
     last_model_name = gen_models[-1]
     return last_model_name
 
@@ -291,17 +315,35 @@ def weights_init(init_type='gaussian'):
 
     return init_fun
 
+def hms(start, diff=False):
+    if diff:
+        t = start
+    else:
+        t = time.time() - start
+    h = int(t / 3600)
+    m = int((t - 3600*h)/60)
+    s = int(t - 3600*h - 60*m)
+    return '%02d:%02d:%02d' % (h, m, s)
 
 class Timer:
-    def __init__(self, msg):
+    def __init__(self, msg, log_freq):
         self.msg = msg
-        self.start_time = None
+        self.log_freq = log_freq
+        self.start_time = time.time()
+        self.enter_time = None
+        self.count = 0
 
     def __enter__(self):
-        self.start_time = time.time()
+        self.enter_time = time.time()
 
     def __exit__(self, exc_type, exc_value, exc_tb):
-        print(self.msg % (time.time() - self.start_time))
+        self.count += 1
+        msg = self.msg % (time.time() - self.enter_time)
+        self.print(msg)
+
+    def print(self, msg):
+        if self.count % self.log_freq == 0:
+            print('[%s][%6d] %s' % (hms(time.time() - self.start_time, True), self.count, msg))
 
 
 def pytorch03_to_pytorch04(state_dict_base, trainer_name):
