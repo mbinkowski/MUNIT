@@ -40,6 +40,11 @@ import time
 # get_scheduler
 # weights_init
 
+def cuda(x):
+    if torch.cuda.is_available():
+        return x.cuda()
+    return x
+
 def get_all_data_loaders(conf):
     batch_size = conf['batch_size']
     num_workers = conf['num_workers']
@@ -233,11 +238,9 @@ def get_model_list(dirname, key):
         return None
     gen_models = [os.path.join(dirname, f) for f in os.listdir(dirname) if
                   os.path.isfile(os.path.join(dirname, f)) and key in f and ".pt" in f]
-    print(key, gen_models)
     if gen_models is None:
         return None
     gen_models.sort()
-    print(key, gen_models)
     last_model_name = gen_models[-1]
     return last_model_name
 
@@ -326,12 +329,12 @@ def hms(start, diff=False):
     return '%02d:%02d:%02d' % (h, m, s)
 
 class Timer:
-    def __init__(self, msg, log_freq):
+    def __init__(self, msg, log_freq, start=0):
         self.msg = msg
         self.log_freq = log_freq
         self.start_time = time.time()
         self.enter_time = None
-        self.count = 0
+        self.count = start 
 
     def __enter__(self):
         self.enter_time = time.time()
@@ -344,6 +347,9 @@ class Timer:
     def print(self, msg):
         if self.count % self.log_freq == 0:
             print('[%s][%6d] %s' % (hms(time.time() - self.start_time, True), self.count, msg))
+
+    def clock(self):
+        return (time.time() - self.start_time)/60
 
 
 def pytorch03_to_pytorch04(state_dict_base, trainer_name):

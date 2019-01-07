@@ -23,6 +23,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--config', type=str, default='configs/edges2handbags_folder.yaml', help='Path to the config file.')
 parser.add_argument('--output_path', type=str, default='.', help="outputs path")
 parser.add_argument("--resume", action="store_true")
+parser.add_argument("--requeue", type=float, default=-1)
 parser.add_argument('--trainer', type=str, default='MUNIT', help="MUNIT|UNIT")
 opts = parser.parse_args()
 
@@ -59,22 +60,58 @@ def new_sample_path(path, name):
         name += np.random.choice(list(string.uppercase))
     return name
 
-#def check_folders(path, config):
-    
+success = False
+#def check_folders(path, name, config):
+basename = os.path.splitext(os.path.basename(opts.config))[0]
+folders = glob(os.path.join(opts.output_path, "logs", basename + '*'))
+skip = ['image_save_iter', 'image_display_iter', 'display_size', 'snapshot_save_iter', 'log_iter', 'resume']
+config_ = dict([(k,v) for k, v in config.items() if k not in skip])
+for f in folders:
+    f_config = os.path.join(f.replace('/logs/', '/outputs/'), 'config.yaml')
+    if not os.path.exists(f_config):
+        print('Config ' + repr(f_config) + ' does not exist')
+        continue
+    config2_ = dict([(k, v) for k, v in get_config(f_config).items() if k not in skip])
+    if config2_ != config_:
+        print('Config ' + repr(f_config) + ' does not match')
+#        for k,v in config_2.items():
+#            if k not in config:
+#                print('key %s does not exist in current config')
+#            elif v != config[k]:
+#                print(k, ': ', v, config[k])
+#        print('A\B', [k for k in config if k not in config_2])
+        continue
+    if len(os.listdir(f)) == 0:
+        print('No checkpoint saved in dir ' + repr(f))
+        continue
+    try:
+        model_name = f.split('/')[-1]
+        print(model_name + ' seems good')
+        train_writer = tensorboardX.SummaryWriter(os.path.join(opts.output_path + "/logs", model_name))
+        output_directory = os.path.join(opts.output_path + "/outputs", model_name)
+        checkpoint_directory, image_directory = prepare_sub_folder(output_directory)
+        print('Resuming ...')
+        iterations = trainer.resume(checkpoint_directory, hyperparameters=config) if config['resume'] else 0
+        success = True
+        print('Model loaded at iteration %d' % iterations)
+        break    
+    except Exception as e:
+        print('Load failed for %s' % model_name)
+        print(e)
 
-model_name = new_sample_path(opts.output_path + "/logs", os.path.splitext(os.path.basename(opts.config))[0])
-train_writer = tensorboardX.SummaryWriter(os.path.join(opts.output_path + "/logs", model_name))
-output_directory = os.path.join(opts.output_path + "/outputs", model_name)
-checkpoint_directory, image_directory = prepare_sub_folder(output_directory)
-shutil.copy(opts.config, os.path.join(output_directory, 'config.yaml')) # copy config file to output folder
+if not success:
+    model_name = new_sample_path(opts.output_path + "/logs", basename)
+    train_writer = tensorboardX.SummaryWriter(os.path.join(opts.output_path + "/logs", model_name))
+    output_directory = os.path.join(opts.output_path + "/outputs", model_name)
+    checkpoint_directory, image_directory = prepare_sub_folder(output_directory)
+    shutil.copy(opts.config, os.path.join(output_directory, 'config.yaml')) # copy config file to output folder
+    iterations = 0
 
 # Start training
-iterations = trainer.resume(checkpoint_directory, hyperparameters=config) if opts.resume else 0
-
 config['vgg_model_path'] = opts.output_path
 if 'd_steps' not in config:
     config['d_steps'] = 1
-timer = Timer("Elapsed time in update: %f", config['log_iter']) 
+timer = Timer("Elapsed time in update: %f", config['log_iter'], iterations) 
 while True:
     for it, (images_a, images_b) in enumerate(zip(train_loader_a, train_loader_b)):
 #    it_a, it_b = iter(train_loader_a), iter(train_loader_b)
@@ -114,6 +151,13 @@ while True:
         # Save network weights
         if (iterations + 1) % config['snapshot_save_iter'] == 0:
             trainer.save(checkpoint_directory, iterations)
+            if (opt.requeue > 0) and (timer.clock() > opt.requeue):
+                timer.print('Requeing job after iteration %d.' % (iterations + 1))
+                try:
+                    subprocess.call('scontrol requeue $SLURM_JOB_ID', shell=True)
+                except Exception as e:
+                    timer.print('[!] Requeueing failed')
+                    print(e)
 
         iterations += 1
         if iterations >= max_iter:

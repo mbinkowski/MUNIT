@@ -4,7 +4,7 @@ Licensed under the CC BY-NC-SA 4.0 license (https://creativecommons.org/licenses
 """
 from networks import AdaINGen, MsImageDis, VAEGen
 from nets import ConvNet5, InvConvNet5
-from utils import weights_init, get_model_list, vgg_preprocess, load_vgg16, get_scheduler
+from utils import weights_init, get_model_list, vgg_preprocess, load_vgg16, get_scheduler, cuda
 from torch.autograd import Variable
 import torch
 import torch.nn as nn
@@ -52,14 +52,17 @@ class MUNIT_Trainer(nn.Module):
 
         self.set_batch_weights(hyperparameters, opt_kwargs)
 
-    def set_batch_weights(self, config, opt_kwargs):
-        if 'bw' not in config:
+    def set_batch_weights(self, hyperparameters, opt_kwargs):
+        if 'bw' not in hyperparameters:
             self.bw = self.bw_gen = False
             return
+        config = hyperparameters['bw'].copy()
+        config['size'] = hyperparameters['new_size']
+        self.bw = True
         if config['AE']:
-            i_dim = config['input_dim_b']
+            i_dim = hyperparameters['input_dim_b']
         else:
-            i_dim = config['input_dim_a'] 
+            i_dim = hyperparameters['input_dim_a'] 
         self.weight = ConvNet5(i_dim=i_dim, o_dim=1, **config)
         self.bw_type = config['type']
         self.bw_full = config['full']
@@ -321,9 +324,7 @@ class MUNIT_Trainer(nn.Module):
 
     def resume(self, checkpoint_dir, hyperparameters):
         # Load generators
-        print('Resume')
         last_model_name = get_model_list(checkpoint_dir, "gen")
-        print(last_model_name)
         state_dict = torch.load(last_model_name)
         self.gen_a.load_state_dict(state_dict['a'])
         self.gen_b.load_state_dict(state_dict['b'])
@@ -397,10 +398,6 @@ class MUNITDD_Trainer(MUNIT_Trainer):
 
         self.set_batch_weights(hyperparameters, opt_kwargs)
 
-    def resume(self, *args, **kwargs):
-        print('resume DD')
-        super(MUNITDD_Trainer, self).resume(*args, **kwargs)
-
     def gen_update(self, x_a, x_b, hyperparameters, iteration):
         s_a = Variable(torch.randn(x_a.size(0), self.style_dim, 1, 1).cuda())
         s_b = Variable(torch.randn(x_b.size(0), self.style_dim, 1, 1).cuda())
@@ -453,10 +450,11 @@ class MUNITDD_Trainer(MUNIT_Trainer):
             _mean_a, _mean_b = torch.mean, torch.mean
         # GAN loss
         loss_f = getattr(loss, self.dis_ab.gan_type.upper())
+        combine_f = lambda x, gp: x + hyperparameters['dis']['gp'] * gp
         loss_dis_ab, log = loss_f(self.dis_ab, torch.cat((x_a, x_ab), dim=1),
                                   pos=torch.cat((x_ba, x_b), dim=1),
                                   phase='discriminator', weights=_mean_a,
-                                  pos_weights=_mean_b)
+                                  pos_weights=_mean_b, combine_f=combine_f)
         
         self.loss_dis_total = hyperparameters['gan_w'] * loss_dis_ab
 
