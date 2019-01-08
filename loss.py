@@ -16,7 +16,7 @@ def pnorm(x, dim=None, p=2):
             return (x**2).sum()
         return (x.abs()**p).sum()
     if dim == -1:
-        x = x.view(x.size()[0], -1)
+        x = x.view(x.size(0), -1)
         dim = 1
     if p == 2:
         return (x**2).sum(dim=dim)
@@ -134,6 +134,29 @@ def WGANGP(disc, neg, pos=None, combine_f=_combine,
     log.update({'gp': gp, 'd loss': loss})
     return combine_f(loss, gp), add_prefix(log, prefix)
 
+
+def SMMD(disc, neg, pos=None, combine_f=_combine, 
+         phase='generator', prefix='', kernel_f='mix_rbf',
+         scale=10, scale_type='both', **kwargs):
+    assert pos is not None, 'Positive sample must be given for MMD loss'
+    K = getattr(kernel, kernel_f)
+    d_neg = disc(neg)
+    d_pos = disc(pos)
+    log = {'disc pos': d_pos.mean(), 'disc neg': d_neg.mean()}
+    mmd2 = kernel.mmd2(K(d_pos, Y=d_neg, K_XY_only=False))
+
+    if phase == 'generator':
+        factor = 1
+    else:
+        factor = -1
+    
+    dfx = torch.stack([grad_penalty(d_pos[:, i], pos) for i in range(d_pos.size(1))]).mean(dim=0)
+    if scale_type == 'both':
+       dfx += torch.stack([grad_penalty(d_neg[:, i], neg) for i in range(d_neg.size(1))]).mean(dim=0)
+    
+    log.update({'scale': dfx.mean(), 'loss': factor * mmd2.mean()})
+    loss = (factor * mmd2 / (1. + scale * dfx)).mean()
+    return loss, add_prefix(log, prefix)
 
 #def MMDGANGP(disc, neg, pos=None, combine_f=_combine, unroll_act=_unroll, 
 #                 phase='generator', prefix='', kernel_f='mix_rq_1dot', 

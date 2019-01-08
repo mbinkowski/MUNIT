@@ -3,6 +3,7 @@ Copyright (C) 2017 NVIDIA Corporation.  All rights reserved.
 Licensed under the CC BY-NC-SA 4.0 license (https://creativecommons.org/licenses/by-nc-sa/4.0/legalcode).
 """
 from networks import AdaINGen, MsImageDis, VAEGen
+import networks
 from nets import ConvNet5, InvConvNet5
 from utils import weights_init, get_model_list, vgg_preprocess, load_vgg16, get_scheduler, cuda
 from torch.autograd import Variable
@@ -364,10 +365,14 @@ class MUNITDD_Trainer(MUNIT_Trainer):
     def __init__(self, hyperparameters):
         super(MUNIT_Trainer, self).__init__()
         # Initiate the networks
+        if 'net' in hyperparameters['dis']:
+            Dis = getattr(networks, hyperparameters['dis']['net'])
+        else:
+            Dis = MsImageDis
         self.gen_a = AdaINGen(hyperparameters['input_dim_a'], hyperparameters['gen'])  # auto-encoder for domain a
         self.gen_b = AdaINGen(hyperparameters['input_dim_b'], hyperparameters['gen'])  # auto-encoder for domain b
-        self.dis_ab = MsImageDis(hyperparameters['input_dim_a'] + hyperparameters['input_dim_b'],
-                                 hyperparameters['dis'])  # joint discriminator for domains a & b
+        self.dis_ab = Dis(hyperparameters['input_dim_a'] + hyperparameters['input_dim_b'],
+                          hyperparameters['dis'])  # joint discriminator for domains a & b
         self.instancenorm = nn.InstanceNorm2d(512, affine=False)
         self.style_dim = hyperparameters['gen']['style_dim']
 
@@ -418,7 +423,8 @@ class MUNITDD_Trainer(MUNIT_Trainer):
         self.loss_gen_adv_ab, log = loss_f(self.dis_ab, torch.cat((x_a, x_ab), dim=1),
                                            pos=torch.cat((x_ba, x_b), dim=1),
                                            phase='generator', weights=_mean_a,
-                                           pos_weights=_mean_b)
+                                           pos_weights=_mean_b, scale=hyperparameters['dis']['gp'],
+                                           scale_type=hyperparameters['dis']['scale_type'] )
 #        self.loss_gen_adv_ab = self.dis_ab.calc_gen_loss(input_fake=torch.cat((x_a, x_ba.detach()), dim=1),
 #                                                         input_real=torch.cat((x_ab.detach(), x_b), dim=1))
         # domain-invariant perceptual loss
@@ -454,7 +460,9 @@ class MUNITDD_Trainer(MUNIT_Trainer):
         loss_dis_ab, log = loss_f(self.dis_ab, torch.cat((x_a, x_ab), dim=1),
                                   pos=torch.cat((x_ba, x_b), dim=1),
                                   phase='discriminator', weights=_mean_a,
-                                  pos_weights=_mean_b, combine_f=combine_f)
+                                  pos_weights=_mean_b, combine_f=combine_f,
+                                  scale=hyperparameters['dis']['gp'],
+                                  scale_type=hyperparameters['dis']['scale_type'])
         
         self.loss_dis_total = hyperparameters['gan_w'] * loss_dis_ab
 

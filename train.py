@@ -44,8 +44,8 @@ elif opts.trainer == 'MUNITDD':
 else:
     sys.exit("Only support MUNITDD|MUNIT|UNIT")
 trainer.cuda()
-train_loader_a, train_loader_b, test_loader_a, test_loader_b = get_all_data_loaders(config)
-
+train_loader_a, train_loader_b, test_loader_a, test_loader_b = loaders = get_all_data_loaders(config)
+display_size = min([display_size] + [len(l) for l in loaders])
 print('Dataset sizes: train A: %d, train B: %d, test A: %d, test B: %d' % (len(train_loader_a),
     len(train_loader_b), len(test_loader_a), len(test_loader_b)))
 train_display_images_a = torch.stack([train_loader_a.dataset[i] for i in range(display_size)]).cuda()
@@ -151,7 +151,7 @@ while True:
         # Save network weights
         if (iterations + 1) % config['snapshot_save_iter'] == 0:
             trainer.save(checkpoint_directory, iterations)
-            if (opt.requeue > 0) and (timer.clock() > opt.requeue):
+            if (opts.requeue > 0) and (timer.clock() > opts.requeue):
                 timer.print('Requeing job after iteration %d.' % (iterations + 1))
                 try:
                     subprocess.call('scontrol requeue $SLURM_JOB_ID', shell=True)
