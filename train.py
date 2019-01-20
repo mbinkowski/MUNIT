@@ -64,7 +64,7 @@ success = False
 #def check_folders(path, name, config):
 basename = os.path.splitext(os.path.basename(opts.config))[0]
 folders = glob(os.path.join(opts.output_path, "logs", basename + '*'))
-skip = ['image_save_iter', 'image_display_iter', 'display_size', 'snapshot_save_iter', 'log_iter', 'resume']
+skip = ['image_save_iter', 'image_display_iter', 'display_size', 'snapshot_save_iter', 'log_iter', 'resume', 'max_iter']
 config_ = dict([(k,v) for k, v in config.items() if k not in skip])
 for f in folders:
     f_config = os.path.join(f.replace('/logs/', '/outputs/'), 'config.yaml')
@@ -112,6 +112,7 @@ config['vgg_model_path'] = opts.output_path
 if 'd_steps' not in config:
     config['d_steps'] = 1
 timer = Timer("Elapsed time in update: %f", config['log_iter'], iterations) 
+trainer.logger = timer
 while True:
     for it, (images_a, images_b) in enumerate(zip(train_loader_a, train_loader_b)):
 #    it_a, it_b = iter(train_loader_a), iter(train_loader_b)
@@ -136,8 +137,8 @@ while True:
         # Write images
         if (iterations + 1) % config['image_save_iter'] == 0:
             with torch.no_grad():
-                test_image_outputs = trainer.sample(test_display_images_a, test_display_images_b)
-                train_image_outputs = trainer.sample(train_display_images_a, train_display_images_b)
+                test_image_outputs = trainer.sample_many(test_display_images_a, test_display_images_b)
+                train_image_outputs = trainer.sample_many(train_display_images_a, train_display_images_b)
             write_2images(test_image_outputs, display_size, image_directory, 'test_%08d' % (iterations + 1))
             write_2images(train_image_outputs, display_size, image_directory, 'train_%08d' % (iterations + 1))
             # HTML

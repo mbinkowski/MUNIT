@@ -290,6 +290,21 @@ class MUNIT_Trainer(nn.Module):
         self.train()
         return x_a, x_a_recon, x_ab1, x_ab2, x_b, x_b_recon, x_ba1, x_ba2
 
+    def sample_many(self, x_a, x_b, n=8):
+        self.eval()
+        s_a = [torch.cat([torch.randn(1, self.style_dim, 1, 1).cuda()] * x_a.size(0), dim=0)
+                for _ in range(n)]
+        s_b = [torch.cat([torch.randn(1, self.style_dim, 1, 1).cuda()] * x_b.size(0), dim=0)
+                for _ in range(n)]
+        x_ba, x_ab = [], []
+        for i in range(n):
+            c_a, s_a_fake = self.gen_a.encode(x_a)
+            c_b, s_b_fake = self.gen_b.encode(x_b)
+            x_ba.append(self.gen_a.decode(c_b, s_a[i]))
+            x_ab.append(self.gen_b.decode(c_a, s_b[i]))
+        self.train()
+        return [x_a] + x_ab + [x_b] + x_ba
+
     def dis_update(self, x_a, x_b, hyperparameters, iteration):
         s_a = Variable(torch.randn(x_a.size(0), self.style_dim, 1, 1).cuda())
         s_b = Variable(torch.randn(x_b.size(0), self.style_dim, 1, 1).cuda())
@@ -404,6 +419,7 @@ class MUNITDD_Trainer(MUNIT_Trainer):
         self.set_batch_weights(hyperparameters, opt_kwargs)
 
     def gen_update(self, x_a, x_b, hyperparameters, iteration):
+        self.gen_opt.zero_grad()
         s_a = Variable(torch.randn(x_a.size(0), self.style_dim, 1, 1).cuda())
         s_b = Variable(torch.randn(x_b.size(0), self.style_dim, 1, 1).cuda())
         # encode
@@ -420,11 +436,13 @@ class MUNITDD_Trainer(MUNIT_Trainer):
                 _mean_a, _mean_b = self._mean_a, self._mean_b
         # GAN loss
         loss_f = getattr(loss, self.dis_ab.gan_type.upper())
+        scale_type = hyperparameters['dis']['scale_type'] if 'scale_type' in hyperparameters['dis'] else None
+        scale = hyperparameters['dis']['gp'] if 'gp' in hyperparameters['dis'] else None
         self.loss_gen_adv_ab, log = loss_f(self.dis_ab, torch.cat((x_a, x_ab), dim=1),
                                            pos=torch.cat((x_ba, x_b), dim=1),
                                            phase='generator', weights=_mean_a,
-                                           pos_weights=_mean_b, scale=hyperparameters['dis']['gp'],
-                                           scale_type=hyperparameters['dis']['scale_type'] )
+                                           pos_weights=_mean_b, scale=scale,
+                                           scale_type=scale_type )
 #        self.loss_gen_adv_ab = self.dis_ab.calc_gen_loss(input_fake=torch.cat((x_a, x_ba.detach()), dim=1),
 #                                                         input_real=torch.cat((x_ab.detach(), x_b), dim=1))
         # domain-invariant perceptual loss
@@ -435,11 +453,13 @@ class MUNITDD_Trainer(MUNIT_Trainer):
                               hyperparameters['vgg_w'] * self.loss_gen_vgg_a + \
                               hyperparameters['vgg_w'] * self.loss_gen_vgg_b
 
-        self.gen_opt.zero_grad()
         self.loss_gen_total.backward()
         self.gen_opt.step()
 
+        self.logger.print_log(log)
+
     def dis_update(self, x_a, x_b, hyperparameters, iteration):
+        self.dis_opt.zero_grad()
         s_a = Variable(torch.randn(x_a.size(0), self.style_dim, 1, 1).cuda())
         s_b = Variable(torch.randn(x_b.size(0), self.style_dim, 1, 1).cuda())
         # encode
@@ -457,22 +477,23 @@ class MUNITDD_Trainer(MUNIT_Trainer):
         # GAN loss
         loss_f = getattr(loss, self.dis_ab.gan_type.upper())
         combine_f = lambda x, gp: x + hyperparameters['dis']['gp'] * gp
+        scale_type = hyperparameters['dis']['scale_type'] if 'scale_type' in hyperparameters['dis'] else None
+        scale = hyperparameters['dis']['gp'] if 'gp' in hyperparameters['dis'] else None
         loss_dis_ab, log = loss_f(self.dis_ab, torch.cat((x_a, x_ab), dim=1),
                                   pos=torch.cat((x_ba, x_b), dim=1),
                                   phase='discriminator', weights=_mean_a,
                                   pos_weights=_mean_b, combine_f=combine_f,
-                                  scale=hyperparameters['dis']['gp'],
-                                  scale_type=hyperparameters['dis']['scale_type'])
+                                  scale=scale, scale_type=scale_type)
         
         self.loss_dis_total = hyperparameters['gan_w'] * loss_dis_ab
 
-        self.dis_opt.zero_grad()
         self.loss_dis_total.backward(retain_graph=self.bw)
         self.dis_opt.step()
 
         if self.bw:
             self.train_batch_weights(self.loss_dis_total, y=x_b, gen_y=x_ab, w_x=self.w_a, w_y=self.w_b)
 
+        self.logger.print_log(log)
 
 UNIT_Trainer = MUNIT_Trainer
 

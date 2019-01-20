@@ -150,12 +150,12 @@ def SMMD(disc, neg, pos=None, combine_f=_combine,
     else:
         factor = -1
     
-    dfx = torch.stack([grad_penalty(d_pos[:, i], pos) for i in range(d_pos.size(1))]).mean(dim=0)
+    dfx = torch.stack([grad_penalty(d_pos[:, i], pos) for i in range(d_pos.size(1))]).mean()
     if scale_type == 'both':
-       dfx += torch.stack([grad_penalty(d_neg[:, i], neg) for i in range(d_neg.size(1))]).mean(dim=0)
+       dfx += torch.stack([grad_penalty(d_neg[:, i], neg) for i in range(d_neg.size(1))]).mean()
     
     log.update({'scale': dfx.mean(), 'loss': factor * mmd2.mean()})
-    loss = (factor * mmd2 / (1. + scale * dfx)).mean()
+    loss = (factor * mmd2 / torch.sqrt(1. + scale * dfx)).mean()
     return loss, add_prefix(log, prefix)
 
 #def MMDGANGP(disc, neg, pos=None, combine_f=_combine, unroll_act=_unroll, 

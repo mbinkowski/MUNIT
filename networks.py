@@ -95,19 +95,24 @@ class MsImageDis2(MsImageDis):
     def __init__(self, input_dim, params):
         self.o_dim = params['o_dim']
         self._size = self.image_size = params['image_size']
+        self.n_res = 0 if ('n_res' not in params) else params['n_res']
         self.conv_o_dim = 0
         super(MsImageDis2, self).__init__(input_dim, params)
         self.linear = nn.Linear(self.conv_o_dim, self.o_dim)
 
     def _make_net(self):
-        dim = self.dim
+        dim, res = self.dim, self.n_res
         cnn_x = []
         cnn_x += [Conv2dBlock(self.input_dim, dim, 4, 2, 1, norm='none', activation=self.activ, pad_type=self.pad_type)]
         for i in range(self.n_layer - 1):
+            cnn_x += [ResBlocks(1, dim, norm=self.norm, activation=self.activ, pad_type=self.pad_type)]
             cnn_x += [Conv2dBlock(dim, dim * 2, 4, 2, 1, norm=self.norm, activation=self.activ, pad_type=self.pad_type)]
             dim *= 2
+            res -= 1
 #        cnn_x += [nn.Conv2d(dim, 1, 1, 1, 0)]
         conv_o_dim = max(1, 1024 // (self._size // (2 ** self.n_layer)) ** 2)
+        if res > 0:
+            cnn_x += [ResBlocks(res, dim, norm=self.norm, activation=self.activ, pad_type=self.pad_type)]
         cnn_x += [Conv2dBlock(dim, conv_o_dim, 1, 1, 0, norm=self.norm, activation=self.activ, pad_type=self.pad_type)]
         cnn_x = nn.Sequential(*cnn_x)
         self.conv_o_dim += conv_o_dim * (self._size // (2 ** self.n_layer)) ** 2

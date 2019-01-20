@@ -351,6 +351,9 @@ class Timer:
     def clock(self):
         return (time.time() - self.start_time)/60
 
+    def print_log(self, log):
+        self.print(', '.join(['%s: %04f' % (k, v) for k, v in log.items()]))
+
 
 def pytorch03_to_pytorch04(state_dict_base, trainer_name):
     def __conversion_core(state_dict_base, trainer_name):
