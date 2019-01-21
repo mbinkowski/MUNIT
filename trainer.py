@@ -315,6 +315,29 @@ class MUNIT_Trainer(nn.Module):
         self.train()
         return [x_a] + x_ab + [x_b] + x_ba
 
+    def sample_with_reconstructions(self, x_a, x_b):
+        self.eval()
+        s_a = torch.randn(x_a.size(0), self.style_dim, 1, 1).cuda()
+        s_a2 = torch.randn(x_a.size(0), self.style_dim, 1, 1).cuda()
+        s_b = torch.randn(x_b.size(0), self.style_dim, 1, 1).cuda()
+        s_b2 = torch.randn(x_b.size(0), self.style_dim, 1, 1).cuda()
+
+        c_a, s_a_code = self.gen_a.encode(x_a)
+        c_b, s_b_code = self.gen_b.encode(x_b)
+        x_ba = self.gen_a.decode(c_b, s_a)
+        x_ab = self.gen_b.decode(c_a, s_b)
+
+        c_ba, _ = self.gen_a.encode(x_ba)
+        c_ab, _ = self.gen_b.encode(x_ab)
+        x_aba = self.gen_a.decode(c_ab, s_a2)
+        x_bab = self.gen_b.decode(c_ba, s_b2)
+
+        x_a_rec = self.gen_a.decode(c_ab, s_a_code)
+        x_b_rec = self.gen_b.decode(c_ba, s_b_code)
+
+        self.train()
+        return [x_a, x_ab, x_aba, x_a_rec, x_b, x_ba, x_bab, x_b_rec]
+
     def dis_update(self, x_a, x_b, hyperparameters, iteration):
         s_a = Variable(torch.randn(x_a.size(0), self.style_dim, 1, 1).cuda())
         s_b = Variable(torch.randn(x_b.size(0), self.style_dim, 1, 1).cuda())

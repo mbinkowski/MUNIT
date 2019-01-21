@@ -8,6 +8,7 @@ from torch.autograd import Variable
 from trainer import MUNITDD_Trainer, MUNIT_Trainer, UNIT_Trainer
 import torch.backends.cudnn as cudnn
 import torch
+import numpy as np
 try:
     from itertools import izip as zip
 except ImportError: # will be 3.x series
@@ -47,11 +48,17 @@ trainer.cuda()
 train_loader_a, train_loader_b, test_loader_a, test_loader_b = loaders = get_all_data_loaders(config)
 print('Dataset sizes: train A: %d, train B: %d, test A: %d, test B: %d' % (len(train_loader_a),
     len(train_loader_b), len(test_loader_a), len(test_loader_b)))
-def sample4display(loader, n):
-    samples = [loader.dataset[i % n] for i in range(n)]
+def sample4display(loader, n, from_dataset=False):
+    if from_dataset:
+        samples = [loader.dataset[i % n] for i in range(n)]
+        if hasattr(samples[0], '__len__'):
+            samples = [s[0] for s in samples]
+        return torch.stack(samples).cuda()
+    samples = [next(iter(loader)) for _ in np.arange(np.ceil(n / config['batch_size']))]
     if hasattr(samples[0], '__len__'):
         samples = [s[0] for s in samples]
-    return torch.stack(samples).cuda()
+    return torch.cat(samples, dim=0)[:n].cuda()
+
 train_display_images_a = sample4display(train_loader_a, display_size)
 train_display_images_b = sample4display(train_loader_b, display_size)
 test_display_images_a = sample4display(test_loader_a, display_size)
@@ -150,6 +157,13 @@ while True:
             write_2images(train_image_outputs, display_size, image_directory, 'train_%08d' % (iterations + 1))
             # HTML
             write_html(output_directory + "/index.html", iterations + 1, config['image_save_iter'], 'images')
+
+            # with reconstructions
+            with torch.no_grad():
+                test_image_outputs = trainer.sample_with_reconstructions(test_display_images_a, test_display_images_b)
+                train_image_outputs = trainer.sample_with_reconstructions(train_display_images_a, train_display_images_b)
+            write_2images(test_image_outputs, display_size, image_directory, 'test_recon_%08d' % (iterations + 1))
+            write_2images(train_image_outputs, display_size, image_directory, 'train_recon_%08d' % (iterations + 1))
 
         if (iterations + 1) % config['image_display_iter'] == 0:
             with torch.no_grad():
