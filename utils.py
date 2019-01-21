@@ -66,10 +66,16 @@ def get_all_data_loaders(conf):
         test_loader_b = get_data_loader_folder(os.path.join(conf['data_root'], 'testB'), batch_size, False,
                                              new_size_b, new_size_b, new_size_b, num_workers, True)
     elif ('data_folder_a' in conf) and ('data_folder_b' in conf):
-        train_loader_a = get_custom_data_loader(conf['data_folder_a'], batch_size, True, size=new_size_a, num_workers=num_workers)
-        test_loader_a = get_custom_data_loader(conf['data_folder_a'], batch_size, False, size=new_size_a, num_workers=num_workers)
-        train_loader_b = get_custom_data_loader(conf['data_folder_b'], batch_size, True, size=new_size_b, num_workers=num_workers)
-        test_loader_b = get_custom_data_loader(conf['data_folder_b'], batch_size, False, size=new_size_b, num_workers=num_workers)
+        custom_a = conf['custom_dataset_a'] if ('custom_dataset_a' in conf) else None
+        custom_b = conf['custom_dataset_b'] if ('custom_dataset_b' in conf) else None
+        train_loader_a = get_custom_data_loader(conf['data_folder_a'], batch_size, True, size=new_size_a,
+                                                num_workers=num_workers, custom=custom_a)
+        test_loader_a = get_custom_data_loader(conf['data_folder_a'], batch_size, False, size=new_size_a,
+                                                num_workers=num_workers, custom=custom_a)
+        train_loader_b = get_custom_data_loader(conf['data_folder_b'], batch_size, True, size=new_size_b,
+                                                num_workers=num_workers, custom=custom_b)
+        test_loader_b = get_custom_data_loader(conf['data_folder_b'], batch_size, False, size=new_size_b,
+                                                num_workers=num_workers, custom=custom_b)
     else:
         train_loader_a = get_data_loader_list(conf['data_folder_train_a'], conf['data_list_train_a'], batch_size, True,
                                                 new_size_a, height, width, num_workers, True)
@@ -109,17 +115,38 @@ def get_data_loader_folder(input_folder, batch_size, train, new_size=None,
     return loader
 
 
-def get_custom_data_loader(input_folder, batch_size, train=True, size=256, num_workers=4, crop=True):
-    # Find the loader by data root name
-    for ds_name in custom_datasets.AVAILABLE:
-        if ds_name in input_folder.upper():
-            print('Root path indicates %s dataset' % ds_name)
-            ds_class = getattr(custom_datasets, ds_name)
-            transform = custom_datasets.get_default_transform(size)
-            dataset = ds_class(root=input_folder, download=True, transform=transform, train=train)
-            return DataLoader(dataset=dataset, batch_size=batch_size, shuffle=train, drop_last=True, num_workers=num_workers)
+def get_custom_data_loader(input_folder, batch_size, train=True, size=256, num_workers=4, crop=True, custom=None):
+    if custom is not None:
+        ds_name = custom.split('-')[0].upper()
+        imbalance = float(custom.split('-')[1]) if ('-' in custom) else None
+    else:
+        ds_name, imbalance = None, None
+        # Find the loader by data root name
+        for avail in custom_datasets.AVAILABLE:
+            if avail in input_folder.upper():
+                ds_name = avail
+                print('Root path indicates %s dataset' % ds_name)
+    if ds_name is None:
+        raise Exception('No custom dataset recognized from directory %s' % input_folder)
 
-    raise Exception('No custom dataset recognized from directory %s' % input_folder)
+    ds_class = getattr(custom_datasets, ds_name)
+    transform = custom_datasets.get_default_transform(size)
+    dataset = ds_class(root=input_folder, download=True, transform=transform, train=train)
+    sampler = get_imbalanced_sampler(dataset, imbalance=imbalance)
+    return DataLoader(dataset=dataset, batch_size=batch_size, shuffle=train and (sampler is None),
+                      drop_last=True, num_workers=num_workers, sampler=sampler)
+
+def get_imbalanced_sampler(dataset, N=64*64, imbalance=.5):
+    if imbalance is None:
+        return None
+    target_classes = [int(d[1]) for d in dataset]
+    classes, counts = np.unique(target_classes, return_counts=True)
+    s1 = sum(counts[1:])
+    n0 = int((s1 * imbalance) / (1 - imbalance))
+    w0, c0 = n0 / counts[0], classes[0]
+    weights = torch.Tensor([w0 if (int(c) == c0) else 1 for c in target_classes])
+    sampler = torch.utils.data.WeightedRandomSampler(weights, N, replacement=True)
+    return sampler
 
 
 def get_config(config):

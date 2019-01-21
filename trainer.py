@@ -65,12 +65,18 @@ class MUNIT_Trainer(nn.Module):
         else:
             i_dim = hyperparameters['input_dim_a'] 
         self.weight = ConvNet5(i_dim=i_dim, o_dim=1, **config)
+        bw_params = list(self.weight.parameters())
+
+        if config['type'] == 'PQSEP2':
+            self.weightB = ConvNet5(i_dim=hyperparameters['input_dim_b'], o_dim=1, **config)
+            bw_params += list(self.weightB.parameters())
+
         self.bw_type = config['type']
         self.bw_full = config['full']
         self.bw_start = config['start']
         self.bw_recon = config['recon']
         self.bw_gen = config['gen']
-        self.bw_opt = torch.optim.Adam(list(self.weight.parameters()), **opt_kwargs)
+        self.bw_opt = torch.optim.Adam(bw_params, **opt_kwargs)
         self.bw_scheduler = get_scheduler(self.bw_opt, hyperparameters)
 
         if config['AE']:
@@ -123,12 +129,12 @@ class MUNIT_Trainer(nn.Module):
         x_a_recon = self.gen_a.decode(c_a, s_a_prime)
         x_b_recon = self.gen_b.decode(c_b, s_b_prime)
 
-    def get_batch_weights(self, x, gen_y, y, step, train=True):
+    def get_batch_weights(self, x, gen_y, y, step, train=True, gen_x=None):
         w_0 = cuda(torch.ones(x.size(0)) / x.size(0))
         n0 = self.bw_full - self.bw_start
         t = .25 + max(0, (step - self.bw_start) / n0)
         s = n0 / (n0 + 10 * (step - self.bw_start))
-        _sm = lambda w: s * w_0 + (1 - s) * torch.nn.functional.softmax((w.view(-1) - w.mean()).clamp(-t, t), dim=0)
+        _sm = lambda w: torch.nn.functional.softmax((w.view(-1) - w.mean()).clamp(-t, t), dim=0)
 
         if step < self.bw_start:
             w_x, w_y = w_0, w_0
@@ -137,6 +143,10 @@ class MUNIT_Trainer(nn.Module):
         elif self.bw_type == 'PQ':
             w_x = .5 * (w_0 + _sm(self.weight(gen_y)))
             w_y = .5 * (w_0 + _sm(-self.weight(y)))
+        elif self.bw_type == 'PQSEP2':
+            assert gen_x is not None
+            w_x = .25 * (2*w_0 + _sm(self.weight(x)) + _sm(-self.weightB(gen_y)))
+            w_y = .25 * (2*w_0 + _sm(-self.weight(gen_x)) + _sm(self.weightB(y)))
         elif self.bw_type == 'A0P':
             r_x, r_y = self.weight(gen_y), self.weight(y).mean(dim=0, keepdim=True)
             a = torch.matmul(r_x, r_y.t()) / np.sqrt(r_x.size(1))
@@ -223,7 +233,7 @@ class MUNIT_Trainer(nn.Module):
 
         _mean_a, _mean_b, _mean_recon_a, _mean_recon_b = torch.mean, torch.mean, torch.mean, torch.mean
         if self.bw:
-            self.w_a, self.w_b = self.get_batch_weights(x_a, x_ab, x_b, iteration, train=True)
+            self.w_a, self.w_b = self.get_batch_weights(x_a, x_ab, x_b, iteration, train=True, gen_x=x_ba)
             if self.bw_gen:
                 _mean_a, _mean_b = self._mean_a, self._mean_b
                 if self.bw_recon:
@@ -316,7 +326,7 @@ class MUNIT_Trainer(nn.Module):
         x_ab = self.gen_b.decode(c_a, s_b)
 
         if self.bw:
-            self.w_a, self.w_b = self.get_batch_weights(x_a, x_ab, x_b, iteration, train=True)
+            self.w_a, self.w_b = self.get_batch_weights(x_a, x_ab, x_b, iteration, train=True, gen_x=x_ba)
             _mean_a, _mean_b = self._mean_a, self._mean_b
         else:
             _mean_a, _mean_b = torch.mean, torch.mean
@@ -431,7 +441,7 @@ class MUNITDD_Trainer(MUNIT_Trainer):
 
         _mean_a, _mean_b = torch.mean, torch.mean
         if self.bw:
-            self.w_a, self.w_b = self.get_batch_weights(x_a, x_ab, x_b, iteration, train=True)
+            self.w_a, self.w_b = self.get_batch_weights(x_a, x_ab, x_b, iteration, train=True, gen_x=x_ba)
             if self.bw_gen:
                 _mean_a, _mean_b = self._mean_a, self._mean_b
         # GAN loss
@@ -470,7 +480,7 @@ class MUNITDD_Trainer(MUNIT_Trainer):
         x_ab = self.gen_b.decode(c_a, s_b)
 
         if self.bw:
-            self.w_a, self.w_b = self.get_batch_weights(x_a, x_ab, x_b, iteration, train=True)
+            self.w_a, self.w_b = self.get_batch_weights(x_a, x_ab, x_b, iteration, train=True, gen_x=x_ba)
             _mean_a, _mean_b = self._mean_a, self._mean_b
         else:
             _mean_a, _mean_b = torch.mean, torch.mean

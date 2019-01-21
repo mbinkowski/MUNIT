@@ -45,13 +45,17 @@ else:
     sys.exit("Only support MUNITDD|MUNIT|UNIT")
 trainer.cuda()
 train_loader_a, train_loader_b, test_loader_a, test_loader_b = loaders = get_all_data_loaders(config)
-display_size = min([display_size] + [len(l) for l in loaders])
 print('Dataset sizes: train A: %d, train B: %d, test A: %d, test B: %d' % (len(train_loader_a),
     len(train_loader_b), len(test_loader_a), len(test_loader_b)))
-train_display_images_a = torch.stack([train_loader_a.dataset[i] for i in range(display_size)]).cuda()
-train_display_images_b = torch.stack([train_loader_b.dataset[i] for i in range(display_size)]).cuda()
-test_display_images_a = torch.stack([test_loader_a.dataset[i] for i in range(display_size)]).cuda()
-test_display_images_b = torch.stack([test_loader_b.dataset[i] for i in range(display_size)]).cuda()
+def sample4display(loader, n):
+    samples = [loader.dataset[i % n] for i in range(n)]
+    if hasattr(samples[0], '__len__'):
+        samples = [s[0] for s in samples]
+    return torch.stack(samples).cuda()
+train_display_images_a = sample4display(train_loader_a, display_size)
+train_display_images_b = sample4display(train_loader_b, display_size)
+test_display_images_a = sample4display(test_loader_a, display_size)
+test_display_images_b = sample4display(test_loader_b, display_size)
 
 # Setup logger and output folders
 def new_sample_path(path, name):
@@ -115,6 +119,9 @@ timer = Timer("Elapsed time in update: %f", config['log_iter'], iterations)
 trainer.logger = timer
 while True:
     for it, (images_a, images_b) in enumerate(zip(train_loader_a, train_loader_b)):
+        if hasattr(images_a, '__len__'):
+            images_a, labels_a = images_a
+            images_b, labels_b = images_b
 #    it_a, it_b = iter(train_loader_a), iter(train_loader_b)
 #    for it in range(max(len(it_a), len(it_b))):
         t0 = time.time()

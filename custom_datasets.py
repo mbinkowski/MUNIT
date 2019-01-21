@@ -8,7 +8,7 @@ from glob import glob
 
 from torchvision.datasets import *
 
-AVAILABLE = ['MNIST', 'SVHN', 'QUICKDRAW', 'CELEBA_QD', 'PORTRAIT', 'CELEBA_DRIT']
+AVAILABLE = ['MNIST', 'SRMNIST', 'SMALLMNIST', 'SVHN', 'QUICKDRAW', 'CELEBA_QD', 'PORTRAIT', 'CELEBA_DRIT']
 
 def get_default_transform(size): 
     return transforms.Compose([ 
@@ -36,16 +36,39 @@ class MNIST(datasets.MNIST):
     def __init__(self, root='.', download=True, transform=None, train=True, **kwargs):
         super(MNIST, self).__init__(root=root, download=download, transform=transform, train=train)
 
-    def __getitem__(self, index):
-        return super(MNIST, self).__getitem__(index)[0]
+#    def __getitem__(self, index):
+#        return super(MNIST, self).__getitem__(index)[0]
+
+class SMALLMNIST(MNIST):
+    def __init__(self, root='.', download=True, transform=None, train=True, **kwargs):
+        trans = transforms.Pad((5,10,15,10), padding_mode='edge')
+        if transform is not None:
+            trans = transforms.Compose([trans, transform])
+        super(SMALLMNIST, self).__init__(root=root, download=download,
+                                         transform=trans, train=train, **kwargs)
+
+
+class SRMNIST(MNIST):
+    def __init__(self, root='.', download=True, transform=None, train=True, **kwargs):
+        trans = transforms.Compose([
+            transforms.Pad((7,7,7,7), padding_mode='edge'),
+            transforms.RandomRotation(15, resample=Image.BILINEAR),
+            transforms.RandomCrop(33)
+           # transforms.RandomResizedCrop(28, scale=(.7, 1.), ratio=(1., 1.))
+        ])
+        if transform is not None:
+            trans = transforms.Compose([trans, transform])
+        super(SRMNIST, self).__init__(root=root, download=download,
+                                         transform=trans, train=train, **kwargs)
+
 
 class SVHN(datasets.SVHN):
     def __init__(self, root='.', download=True, transform=None, train=True, **kwargs):
         super(SVHN, self).__init__(root=root, download=download, transform=transform,
                                    split='train' if train else 'test')
 
-    def __getitem__(self, index):
-        return super(SVHN, self).__getitem__(index)[0]
+#    def __getitem__(self, index):
+#        return super(SVHN, self).__getitem__(index)[0]
 
 
 
