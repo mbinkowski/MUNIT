@@ -130,3 +130,83 @@ class CELEBA_DRIT(ImageFolder):
         transforms.RandomResizedCrop(256, scale=(.9, 1), ratio=(1,1)),
         transforms.RandomHorizontalFlip()
     ]
+
+class Folder(Dataset):
+    default_transforms = []
+
+    def __init__(self, root='.', transform=None, with_saving=False, suffix='', **kwargs):
+        self.count = 0
+        name = root.replace('data1', 'tmp1/binkowsm') 
+        if name[-1] == '/':
+            name = name[:-1]
+        name += suffix
+        if with_saving:
+            if not os.path.exists(name):
+                os.makedirs(name)
+            if os.path.exists(name + '.pt'):
+                self.ims = torch.load(name + '.pt').cpu()#.data.numpy()
+                return
+        self.files = glob(os.path.join(root, '*.jpg'))
+        assert len(self.files) > 0, 'No jpg file found in the root directory %s.' % root
+        print('Dataset initializer; found %d .jpg images in the root directory %s' % (len(self.files), root))
+        self.transform = transforms.Compose(self.default_transforms  + [transform] * (transform is not None))
+        if with_saving:
+            self._save(name)
+
+    def __len__(self):
+        if hasattr(self, 'ims'):
+            return len(self.ims)
+        return len(self.files)
+
+    def __getitem__(self, idx):
+#        print('DataFolder sampling count', self.count)
+#        self.count += 1
+        if hasattr(self, 'ims'):
+            return self.ims[idx], 0
+        image = Image.open(self.files[idx])
+        return self.transform(image), 0
+
+    def _save(self, name):
+        ims = []
+        for i in range(self.__len__()):
+            ims.append(self.__getitem__(i)[0].cpu())
+            if i % 1000 == 0:
+                print('Image Folder saving. Processed: %d' % i)
+        self.ims = torch.stack(ims)
+#        self.tensor = cuda(self.tensor)
+        torch.save(torch.Tensor(self.ims), name + '.pt')
+
+
+class EDGES(Dataset):
+    left, name = 0, 'EDGES'
+    def __init__(self, root='.', transform=None, with_saving=True, **kwargs):
+        assert 'shoes' in root, root
+        crop = lambda x: transforms.functional.crop(x, 0, self.left, 256, 256)
+        t = transforms.Lambda(crop)
+        if transforms is not None:
+            t = transforms.Compose([t, transform])
+        self.shoes = Folder(root=root, transform=t, with_saving=with_saving, 
+                                 suffix=self.name.lower(), **kwargs)
+        self.handbags = Folder(root=root.replace('shoes', 'handbags'),
+                                    transform=t, with_saving=with_saving, 
+                                    suffix=self.name.lower(), **kwargs)
+        print('%s dataset: %d shoes, %d handbags' % (self.name, len(self.shoes), len(self.handbags)))
+        self.count = 0
+
+    def __len__(self):
+        return len(self.shoes) + len(self.handbags)
+
+    def __getitem__(self, idx):
+#        print(self.name, 'samplied', self.count)
+#        self.count += 1
+        if idx < len(self.shoes):
+            return self.shoes[idx][0], 0
+        else:
+            return self.handbags[idx - len(self.shoes)][0], 1
+
+    def get_target_classes(self):
+        return [0] * len(self.shoes) + [1] * len(self.handbags)
+
+class SHOESHANDBAGS(EDGES):
+    left, name = 256, 'SHOESHANDBAGS'
+
